@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import {
   initialize,
   AudioTrack,
@@ -8,25 +9,95 @@ import {
   type ArrangementSelection,
   type Device,
 } from "@ableton-extensions/sdk";
-import { GENRES, analyzeWav, faderAfterGain, hzToNorm, planMix, type Genre, type Measured, type TrackPlan } from "./mix.js";
+import keyDialog from "./keyDialog.html";
+import {
+  AI_SYSTEM_PROMPT,
+  GENRES,
+  aiUserPrompt,
+  analyzeWav,
+  faderAfterGain,
+  hzToNorm,
+  parseAiPlan,
+  planMix,
+  type Measured,
+  type TrackPlan,
+} from "./mix.js";
 
 type Context = ReturnType<typeof initialize>;
 type V = "1.0.0";
+type Planner = (measured: Measured[]) => Promise<{ label: string; plan: TrackPlan[] }>;
+
+const OPENROUTER_MODEL = "openrouter/free";
+const SCOPES = ["AudioTrack.ArrangementSelection", "MidiTrack.ArrangementSelection"] as const;
 
 export function activate(activation: ActivationContext) {
   const context = initialize(activation, "1.0.0");
-  for (const genre of GENRES) {
-    const id = `granmaster.mix.${genre.toLowerCase()}`;
+  const register = (id: string, title: string, run: (sel: ArrangementSelection) => Promise<unknown>) => {
     context.commands.registerCommand(id, (arg: unknown) => {
-      void mix(context, arg as ArrangementSelection, genre).catch((e) => console.error("Granmaster:", e));
+      void run(arg as ArrangementSelection).catch((e) => console.error("Granmaster:", e));
     });
-    for (const scope of ["AudioTrack.ArrangementSelection", "MidiTrack.ArrangementSelection"] as const) {
-      void context.ui.registerContextMenuAction(scope, `Granmaster: Mix (${genre})`, id);
-    }
+    for (const scope of SCOPES) void context.ui.registerContextMenuAction(scope, title, id);
+  };
+
+  for (const genre of GENRES) {
+    register(`granmaster.mix.${genre.toLowerCase()}`, `Granmaster: Mix (${genre})`, (sel) =>
+      mix(context, sel, async (m) => ({ label: genre, plan: planMix(m, genre) })),
+    );
+  }
+  register("granmaster.mix.ai", "Granmaster: Mix (AI)", async (sel) => {
+    const key = (await readKey(context)) ?? (await askKey(context));
+    if (!key) return console.warn("Granmaster: no OpenRouter API key, AI mix cancelled.");
+    return mix(context, sel, async (m) => {
+      const { genre, plan } = parseAiPlan(await askOpenRouter(key, aiUserPrompt(m, context.application.song.tempo)), m);
+      return { label: `AI: ${genre}`, plan };
+    });
+  });
+  register("granmaster.key", "Granmaster: Set OpenRouter API key", () => askKey(context));
+}
+
+const keyFile = (context: Context) => {
+  const dir = context.environment.storageDirectory;
+  if (!dir) throw new Error("Live gave this extension no storage directory");
+  return path.join(dir, "openrouter-key.txt");
+};
+
+async function readKey(context: Context): Promise<string | null> {
+  try {
+    return (await fs.readFile(keyFile(context), "utf8")).trim() || null;
+  } catch {
+    return null;
   }
 }
 
-async function mix(context: Context, sel: ArrangementSelection, genre: Genre) {
+async function askKey(context: Context): Promise<string | null> {
+  const { key } = JSON.parse(await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(keyDialog)}`, 420, 180)) as { key: unknown };
+  if (typeof key !== "string" || !key) return null;
+  await fs.mkdir(path.dirname(keyFile(context)), { recursive: true });
+  await fs.writeFile(keyFile(context), key, { mode: 0o600 });
+  return key;
+}
+
+async function askOpenRouter(key: string, userPrompt: string): Promise<string> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "Granmaster" },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: AI_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  const body = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } } | null;
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${body?.error?.message ?? res.statusText}`);
+  const content = body?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("OpenRouter returned no message");
+  return content;
+}
+
+async function mix(context: Context, sel: ArrangementSelection, planner: Planner) {
   const tracks = sel.selected_lanes
     .map((h) => context.getObjectFromHandle(h, DataModelObject))
     .filter((o): o is Track<V> => o instanceof Track);
@@ -49,8 +120,18 @@ async function mix(context: Context, sel: ArrangementSelection, genre: Genre) {
     }
     signal.throwIfAborted();
 
-    const plan = planMix(measured, genre);
-    for (const p of plan) console.log(`Granmaster [${genre}]`, JSON.stringify(p));
+    await update("Planning mix…", 90);
+    let label: string, plan: TrackPlan[];
+    try {
+      ({ label, plan } = await planner(measured));
+    } catch (e) {
+      // Nothing has been changed yet, so stopping here is safe.
+      console.error("Granmaster: planning failed, Set left unchanged:", e);
+      await update(`Granmaster failed: ${e instanceof Error ? e.message : e}`, 100);
+      await new Promise((r) => setTimeout(r, 4000)); // keep the message readable before the dialog closes
+      return;
+    }
+    for (const p of plan) console.log(`Granmaster [${label}]`, JSON.stringify(p));
 
     await update("Applying mix…", 95);
     // Read current fader values first so all writes can go in one transaction.

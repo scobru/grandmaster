@@ -62,6 +62,41 @@ export function planMix(tracks: Measured[], genre: Genre): TrackPlan[] {
   });
 }
 
+export const AI_SYSTEM_PROMPT = `You are a mixing engineer setting a starting mix in Ableton Live.
+You get the tempo and, for each track, its name and gated RMS and peak in dBFS of its pre-FX audio
+(rmsDb null means Live could not render it: its level is unknown, so give gainDb 0).
+Infer the genre and each track's role from names and levels. Reply with JSON only, no prose:
+{"genre": string, "tracks": [{"name": string, "gainDb": number, "pan": number, "hpfHz": number | null}]}
+gainDb is the fader change in dB (-12..12). pan is -1 (left) .. 1 (right); keep kick, bass, snare and lead vocal at 0.
+hpfHz is a high-pass cutoff in Hz (20..1000), or null for kick, bass and full drum kits.`;
+
+export function aiUserPrompt(tracks: Measured[], tempo: number): string {
+  const round = (x: number) => (Number.isFinite(x) ? x : null); // JSON has no -Infinity
+  return JSON.stringify({ tempo, tracks: tracks.map((t) => ({ name: t.name, rmsDb: round(t.rmsDb), peakDb: round(t.peakDb) })) });
+}
+
+// The reply is untrusted: take only known fields, clamp every number, fall back per track.
+export function parseAiPlan(reply: string, tracks: Measured[]): { genre: string; plan: TrackPlan[] } {
+  const data = JSON.parse(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1)) as { genre?: unknown; tracks?: unknown };
+  if (!Array.isArray(data.tracks)) throw new Error("AI reply has no tracks array");
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const t of data.tracks) if (t && typeof t === "object") byName.set(String((t as Record<string, unknown>).name), t as Record<string, unknown>);
+  if (!tracks.some((t) => byName.has(t.name))) throw new Error("AI reply matches none of the tracks");
+  const num = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) ? clamp(v, lo, hi) : null);
+  const plan = tracks.map(({ name, rmsDb }) => {
+    const t = byName.get(name);
+    const hpf = num(t?.hpfHz, 20, 1000);
+    return {
+      name,
+      role: roleOf(name),
+      gainDb: rmsDb <= SILENCE_DB ? 0 : round1(num(t?.gainDb, -MAX_GAIN_DB, MAX_GAIN_DB) ?? 0),
+      pan: round1(num(t?.pan, -1, 1) ?? 0),
+      hpfHz: hpf === null ? null : Math.round(hpf),
+    };
+  });
+  return { genre: typeof data.genre === "string" ? data.genre.slice(0, 40) : "unknown", plan };
+}
+
 // Gated RMS (400 ms blocks above -60 dBFS, mono sum of channel power) and sample peak.
 export function analyzeWav(buf: Uint8Array): { rmsDb: number; peakDb: number } {
   const { samples, channels, rate } = decodeWav(buf);

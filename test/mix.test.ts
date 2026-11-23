@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeWav, decodeWav, faderAfterGain, hzToNorm, planMix, roleOf } from "../src/mix.ts";
+import { aiUserPrompt, analyzeWav, decodeWav, faderAfterGain, hzToNorm, parseAiPlan, planMix, roleOf } from "../src/mix.ts";
 
 // Build a 16-bit PCM or 32-bit float WAV from interleaved samples.
 function wav(samples: number[], channels = 1, rate = 1000, float = false): Uint8Array {
@@ -74,4 +74,37 @@ test("fader and frequency mapping", () => {
   assert.equal(faderAfterGain(0.1, -12), 0);
   assert.equal(hzToNorm(10), 0);
   assert.equal(hzToNorm(22000), 1);
+});
+
+test("AI reply: fenced JSON parsed, values clamped, unknown level and missing tracks fall back", () => {
+  const tracks = [
+    { name: "Kick", rmsDb: -20, peakDb: -3 },
+    { name: "Pad", rmsDb: -30, peakDb: -10 },
+    { name: "Synth (MIDI)", rmsDb: -Infinity, peakDb: -Infinity },
+    { name: "Missing", rmsDb: -18, peakDb: -6 },
+  ];
+  const reply = 'Sure!\n```json\n{"genre":"Techno","tracks":[' +
+    '{"name":"Kick","gainDb":40,"pan":0,"hpfHz":null},' +
+    '{"name":"Pad","gainDb":-3.14,"pan":-5,"hpfHz":5000},' +
+    '{"name":"Synth (MIDI)","gainDb":6,"pan":0.4,"hpfHz":"lots"}]}\n```';
+  const { genre, plan } = parseAiPlan(reply, tracks);
+  assert.equal(genre, "Techno");
+  assert.deepEqual(plan.map((p) => [p.gainDb, p.pan, p.hpfHz]), [
+    [12, 0, null],
+    [-3.1, -1, 1000],
+    [0, 0.4, null],
+    [0, 0, null],
+  ]);
+});
+
+test("AI reply without usable tracks is rejected", () => {
+  const tracks = [{ name: "Kick", rmsDb: -20, peakDb: -3 }];
+  assert.throws(() => parseAiPlan("no json here", tracks));
+  assert.throws(() => parseAiPlan('{"genre":"x"}', tracks), /no tracks/);
+  assert.throws(() => parseAiPlan('{"tracks":[{"name":"Other"}]}', tracks), /none of the tracks/);
+});
+
+test("AI prompt encodes unrendered levels as null", () => {
+  const p = JSON.parse(aiUserPrompt([{ name: "Synth", rmsDb: -Infinity, peakDb: -Infinity }], 128));
+  assert.deepEqual(p, { tempo: 128, tracks: [{ name: "Synth", rmsDb: null, peakDb: null }] });
 });
