@@ -12,10 +12,10 @@
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
-    "@ableton-extensions/sdk": "file:./vendor/ableton-extensions-sdk-1.0.0-beta.0.tgz"
+    "@ableton-extensions/sdk": "file:./vendor/ableton-extensions-sdk-1.0.0-beta.1.tgz"
   },
   "devDependencies": {
-    "@ableton-extensions/cli": "file:./vendor/ableton-extensions-cli-1.0.0-beta.0.tgz",
+    "@ableton-extensions/cli": "file:./vendor/ableton-extensions-cli-1.0.0-beta.1.tgz",
     "@types/node": "^24.1.0",
     "esbuild": "0.28.0",
     "tsx": "^4.19.0",

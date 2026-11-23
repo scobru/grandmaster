@@ -124,10 +124,10 @@ interface ClipLoopSettings {
 - `Device`: `name`, `parameters: DeviceParameter[]`
 - `RackDevice`: `chains: Chain[]`, `selectedChain`
 - `Chain` → `DrumChain`; `Chain.devices[]`, `Chain.mixer: ChainMixer`
-- `DeviceParameter`: `name`, `min`, `max`, `defaultValue`, `isQuantized`, `valueItems: DeviceParameterValueItem[]`; async `getValue()` / `setValue(v)`
+- `DeviceParameter`: `name`, `min`, `max`, `defaultValue`, `isQuantized`, `valueItems: DeviceParameterValueItem[]` (quantized: set `min + index` of the item); async `getValue()` / `setValue(v)`
 
 ```typescript
-interface DeviceParameterValueItem { name: string; value: number }
+interface DeviceParameterValueItem { name: string; shortName: string } // beta.1: no value field
 ```
 
 ## Other objects
