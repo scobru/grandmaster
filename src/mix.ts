@@ -3,23 +3,24 @@
 export const GENRES = ["House", "Techno", "Hip-Hop", "Pop"] as const;
 export type Genre = (typeof GENRES)[number];
 
-type Role = "kick" | "bass" | "snare" | "hats" | "vox" | "lead" | "pad" | "fx" | "other";
+type Role = "kick" | "drums" | "bass" | "snare" | "hats" | "vox" | "lead" | "pad" | "fx" | "other";
 
-// First match wins, so order matters (e.g. "808" is bass before anything else).
+// First match wins, so order matters ("Bass Drum" is a kick, "808" alone is bass).
 const ROLE_PATTERNS: [Role, RegExp][] = [
+  ["kick", /kick|\bbd\b|kck|bass ?drum/i],
+  ["drums", /kit|drum|beat|break/i],
   ["bass", /bass|sub|808/i],
-  ["kick", /kick|\bbd\b|kck/i],
   ["snare", /snare|clap|\bsd\b|rim/i],
   ["hats", /hat|\bhh\b|cymb|ride|perc|shaker|top/i],
   ["vox", /vox|vocal|voice|\bvx\b/i],
   ["fx", /fx|riser|sweep|impact|noise/i],
   ["pad", /pad|string|choir|atmo|ambient/i],
-  ["lead", /lead|synth|pluck|arp|key|piano|guitar|gtr/i],
+  ["lead", /lead|synth|pluck|arp|key|piano|organ|rhodes|chord|guitar|gtr/i],
 ];
 
 // Target gated RMS in dBFS per role (pre-FX render).
 const BASE_TARGET: Record<Role, number> = {
-  kick: -12, bass: -14, snare: -15, hats: -22, vox: -14, lead: -18, pad: -22, fx: -26, other: -20,
+  kick: -12, drums: -12, bass: -14, snare: -15, hats: -22, vox: -14, lead: -18, pad: -22, fx: -26, other: -20,
 };
 
 const GENRE_OFFSET: Record<Genre, Partial<Record<Role, number>>> = {
@@ -29,12 +30,12 @@ const GENRE_OFFSET: Record<Genre, Partial<Record<Role, number>>> = {
   Pop: { vox: 2, kick: -1, bass: -1 },
 };
 
-// High-pass cutoff per role; kick and bass keep their lows.
+// High-pass cutoff per role; kick, drums and bass keep their lows.
 const HPF_HZ: Partial<Record<Role, number>> = {
   snare: 100, hats: 300, vox: 90, lead: 150, pad: 200, fx: 150, other: 100,
 };
 
-const CENTER: Role[] = ["kick", "bass", "snare", "vox", "lead"];
+const CENTER: Role[] = ["kick", "drums", "bass", "snare", "vox", "lead"];
 const MAX_GAIN_DB = 12;
 const SILENCE_DB = -60;
 

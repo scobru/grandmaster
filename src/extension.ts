@@ -37,14 +37,15 @@ async function mix(context: Context, sel: ArrangementSelection, genre: Genre) {
     for (const [i, track] of tracks.entries()) {
       signal.throwIfAborted();
       await update(`Analyzing ${track.name}…`, Math.round((i / tracks.length) * 90));
-      if (!(track instanceof AudioTrack)) {
-        // Only audio tracks can be rendered; MIDI tracks keep their level but still get pan and EQ.
-        console.warn(`Granmaster: ${track.name} is not an audio track, level left unchanged.`);
+      try {
+        // shortcut: typings accept only AudioTrack, but the host takes any lane handle; MIDI render is tried and falls back if Live refuses.
+        const file = await context.resources.renderPreFxAudio(track as AudioTrack<V>, sel.time_selection_start, sel.time_selection_end);
+        measured.push({ name: track.name, ...analyzeWav(await fs.readFile(file)) });
+      } catch (e) {
+        // MIDI tracks Live cannot render keep their level but still get pan and EQ.
+        console.warn(`Granmaster: cannot render ${track.name}${track instanceof AudioTrack ? "" : " (MIDI)"}, level left unchanged:`, e);
         measured.push({ name: track.name, rmsDb: -Infinity, peakDb: -Infinity });
-        continue;
       }
-      const file = await context.resources.renderPreFxAudio(track, sel.time_selection_start, sel.time_selection_end);
-      measured.push({ name: track.name, ...analyzeWav(await fs.readFile(file)) });
     }
     signal.throwIfAborted();
 
@@ -63,15 +64,17 @@ async function mix(context: Context, sel: ArrangementSelection, genre: Genre) {
       ),
     );
     // Device inserts resolve asynchronously, so they and their settings land as later undo steps.
-    await Promise.all(tracks.map((t, i) => addHighPass(t, plan[i]!)));
-    await addMasterBus(context.application.song.mainTrack);
+    // One failing device must not stop the others (or the master bus).
+    await Promise.all(tracks.map((t, i) => addHighPass(t, plan[i]!).catch((e) => console.warn(`Granmaster: EQ on ${t.name}:`, e))));
+    await addMasterBus(context.application.song.mainTrack).catch((e) => console.warn("Granmaster: master bus:", e));
   });
 }
 
 async function addHighPass(track: Track<V>, plan: TrackPlan) {
-  // shortcut: treats an existing EQ Eight in slot 0 as ours to avoid stacking on re-runs; tag our devices if the SDK allows renaming.
-  if (plan.hpfHz === null || track.devices[0]?.name === "EQ Eight") return;
-  const eq = await track.insertDevice("EQ Eight", 0);
+  // Appended, not at 0: an audio effect cannot sit before a MIDI track's instrument.
+  // shortcut: treats an EQ Eight at the end of the chain as ours to avoid stacking on re-runs; tag our devices if the SDK allows renaming.
+  if (plan.hpfHz === null || track.devices.at(-1)?.name === "EQ Eight") return;
+  const eq = await track.insertDevice("EQ Eight", track.devices.length);
   await setParam(eq, "1 Filter Type A", "Low Cut 48");
   await setParam(eq, "1 Frequency A", (p) => (p.max <= 1 ? hzToNorm(plan.hpfHz!) : plan.hpfHz!));
   await setParam(eq, "1 Filter On A", 1);
