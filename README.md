@@ -15,6 +15,14 @@ Select a time range across the tracks in Arrangement view, right-click, and pick
 
 The computed plan for each track is logged to `ExtensionHost.txt`.
 
+## AI mode (OpenRouter)
+
+**Granmaster: Mix (AI)** sends the track names, measured levels and tempo to OpenRouter's free router (`openrouter/free`, which picks a free model per request). The model infers the genre and returns gain, pan and high-pass per track. The reply is validated: unknown fields are ignored, values are clamped (±12 dB, pan −1..1, high-pass 20–1000 Hz), and tracks missing from the reply are left unchanged. If the request or the reply fails, nothing in the Set is changed.
+
+The first AI run asks for an OpenRouter API key (create one at openrouter.ai/keys). It is saved as `openrouter-key.txt` in the extension's storage directory on your computer. **Granmaster: Set OpenRouter API key** replaces it.
+
+Free models are rate-limited and the same Set can get a different mix on each run.
+
 ## Setup
 
 1. Download the SDK zip from the Ableton beta program and copy `ableton-extensions-sdk-<version>.tgz` and `ableton-extensions-cli-<version>.tgz` into `vendor/`. If the version is not `1.0.0-beta.1`, update the two paths in `package.json`.
@@ -32,5 +40,6 @@ npm run package # build dist/*.ablx
 ## Layout
 
 - `src/mix.ts`: WAV decoding, analysis, role detection, mix plan. Pure TypeScript, unit tested.
-- `src/extension.ts`: Live glue (menu actions, rendering, mixer and device changes).
+- `src/extension.ts`: Live glue (menu actions, rendering, mixer and device changes, OpenRouter call).
+- `src/keyDialog.html`: API key dialog, based on the SDK `modal-dialog` example.
 - `.claude/skills/ableton-extensions`: community SDK skill (Ronvaknins/ableton-extensions-skill) used as reference.
