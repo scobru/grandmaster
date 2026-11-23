@@ -86,7 +86,7 @@ export function analyzeWav(buf: Uint8Array): { rmsDb: number; peakDb: number } {
 export function decodeWav(buf: Uint8Array): { samples: Float32Array; channels: number; rate: number } {
   const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const tag = (o: number) => String.fromCharCode(buf[o]!, buf[o + 1]!, buf[o + 2]!, buf[o + 3]!);
-  if (tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("Not a WAV file");
+  if (tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("Rendered audio is not WAV: set Preferences → Record, Warp & Launch → File Type to WAV");
   let format = 0, channels = 0, rate = 0, bits = 0;
   for (let o = 12; o + 8 <= buf.length; ) {
     const id = tag(o), size = v.getUint32(o + 4, true), body = o + 8;

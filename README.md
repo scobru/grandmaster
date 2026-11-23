@@ -17,7 +17,7 @@ The computed plan for each track is logged to `ExtensionHost.txt`.
 
 ## Setup
 
-1. Download the SDK zip from the Ableton beta program and copy `ableton-extensions-sdk-<version>.tgz` and `ableton-extensions-cli-<version>.tgz` into `vendor/`. If the version is not `1.0.0-beta.0`, update the two paths in `package.json`.
+1. Download the SDK zip from the Ableton beta program and copy `ableton-extensions-sdk-<version>.tgz` and `ableton-extensions-cli-<version>.tgz` into `vendor/`. If the version is not `1.0.0-beta.1`, update the two paths in `package.json`.
 2. Create `.env` containing `EXTENSION_HOST_PATH=<path to ExtensionHostNodeModule.node inside your Live install>`.
 3. In Live, turn on Developer Mode under Preferences → Extensions.
 4. Install and run:

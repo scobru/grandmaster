@@ -21,7 +21,7 @@ const square = (amp: number, n: number) => Array.from({ length: n }, (_, i) => (
 test("decodes 16-bit and float WAV", () => {
   assert.equal(decodeWav(wav([0.5, -0.5])).samples.length, 2);
   assert.ok(Math.abs(decodeWav(wav([0.25], 1, 1000, true)).samples[0]! - 0.25) < 1e-6);
-  assert.throws(() => decodeWav(new Uint8Array(12)), /Not a WAV/);
+  assert.throws(() => decodeWav(new Uint8Array(12)), /not WAV/);
 });
 
 test("square wave at 0.5 measures -6 dB RMS and peak", () => {
