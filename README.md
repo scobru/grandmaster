@@ -6,7 +6,7 @@ Ableton Live extension (Extensions SDK, Live 12.4.5 Suite beta) that gives a sel
 
 Select a time range across the tracks in Arrangement view, right-click, and pick **Granmaster: Mix (House | Techno | Hip-Hop | Pop)**.
 
-1. Renders each track's pre-FX audio for the selection and measures gated RMS and peak.
+1. Renders each audio track's pre-FX audio for the selection and measures gated RMS and peak. Live cannot render MIDI tracks: bounce them to audio to have their level balanced (they still get pan and EQ).
 2. Guesses each track's role from its name (kick, bass, snare, hats, vox, lead, pad, fx, other).
 3. Moves each fader toward a target level for that role and genre (at most ±12 dB).
 4. Pans: kick, bass, snare, vox and lead stay centered; other tracks alternate left and right (30–60%).
@@ -19,7 +19,7 @@ The computed plan for each track is logged to `ExtensionHost.txt`.
 
 **Granmaster: Mix (AI)** sends the track names, measured levels and tempo to OpenRouter's free router (`openrouter/free`, which picks a free model per request). The model infers the genre and returns gain, pan and high-pass per track. The reply is validated: unknown fields are ignored, values are clamped (±12 dB, pan −1..1, high-pass 20–1000 Hz), and tracks missing from the reply are left unchanged. If the request or the reply fails, nothing in the Set is changed.
 
-The first AI run asks for an OpenRouter API key (create one at openrouter.ai/keys). It is saved as `openrouter-key.txt` in the extension's storage directory on your computer. **Granmaster: Set OpenRouter API key** replaces it.
+The first AI run asks for an OpenRouter API key (create one at openrouter.ai/keys). It is saved as `openrouter-key.txt` in the extension's storage directory on your computer (`~/.granmaster/` when running with `npm start`, which provides none). **Granmaster: Set OpenRouter API key** replaces it.
 
 Free models are rate-limited and the same Set can get a different mix on each run.
 

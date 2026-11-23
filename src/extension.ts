@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   initialize,
@@ -56,8 +57,8 @@ export function activate(activation: ActivationContext) {
 }
 
 const keyFile = (context: Context) => {
-  const dir = context.environment.storageDirectory;
-  if (!dir) throw new Error("Live gave this extension no storage directory");
+  // `extensions-cli run` gives no storage directory, so fall back to the user's home.
+  const dir = context.environment.storageDirectory ?? path.join(os.homedir(), ".granmaster");
   return path.join(dir, "openrouter-key.txt");
 };
 
@@ -109,12 +110,12 @@ async function mix(context: Context, sel: ArrangementSelection, planner: Planner
       signal.throwIfAborted();
       await update(`Analyzing ${track.name}…`, Math.round((i / tracks.length) * 90));
       try {
-        // shortcut: typings accept only AudioTrack, but the host takes any lane handle; MIDI render is tried and falls back if Live refuses.
-        const file = await context.resources.renderPreFxAudio(track as AudioTrack<V>, sel.time_selection_start, sel.time_selection_end);
+        // Live renders audio tracks only (tested: MIDI tracks are refused); unrendered tracks keep their level but still get pan and EQ.
+        if (!(track instanceof AudioTrack)) throw "MIDI track, bounce it to audio to have its level balanced";
+        const file = await context.resources.renderPreFxAudio(track, sel.time_selection_start, sel.time_selection_end);
         measured.push({ name: track.name, ...analyzeWav(await fs.readFile(file)) });
       } catch (e) {
-        // MIDI tracks Live cannot render keep their level but still get pan and EQ.
-        console.warn(`Granmaster: cannot render ${track.name}${track instanceof AudioTrack ? "" : " (MIDI)"}, level left unchanged:`, e);
+        console.warn(`Granmaster: ${track.name}: level left unchanged (${e instanceof Error ? e.message : e}).`);
         measured.push({ name: track.name, rmsDb: -Infinity, peakDb: -Infinity });
       }
     }
@@ -156,7 +157,7 @@ async function addHighPass(track: Track<V>, plan: TrackPlan) {
   // shortcut: treats an EQ Eight at the end of the chain as ours to avoid stacking on re-runs; tag our devices if the SDK allows renaming.
   if (plan.hpfHz === null || track.devices.at(-1)?.name === "EQ Eight") return;
   const eq = await track.insertDevice("EQ Eight", track.devices.length);
-  await setParam(eq, "1 Filter Type A", "Low Cut 48");
+  await setChoice(eq, "1 Filter Type A", /low ?cut.*48|cut ?48|48/i, 0); // Live order: Low Cut 48 is item 0
   await setParam(eq, "1 Frequency A", (p) => (p.max <= 1 ? hzToNorm(plan.hpfHz!) : plan.hpfHz!));
   await setParam(eq, "1 Filter On A", 1);
 }
@@ -164,7 +165,7 @@ async function addHighPass(track: Track<V>, plan: TrackPlan) {
 async function addMasterBus(main: Track<V>) {
   if (!main.devices.some((d) => d.name === "Glue Compressor")) {
     const glue = await main.insertDevice("Glue Compressor", main.devices.length);
-    await setParam(glue, "Ratio", "2");
+    await setChoice(glue, "Ratio", /^2(:1)?$/, 0); // Live order: 2, 4, 10
     await setParam(glue, "Threshold", -12);
   }
   if (!main.devices.some((d) => d.name === "Limiter")) {
@@ -174,13 +175,30 @@ async function addMasterBus(main: Track<V>) {
 
 type Param = Device<V>["parameters"][number];
 
-// value: a number (clamped to range), a value-item label to match, or a function of the parameter.
-async function setParam(device: Device<V>, name: string, value: number | string | ((p: Param) => number)) {
+const findParam = (device: Device<V>, name: string) => {
   const p = device.parameters.find((x) => x.name === name);
-  if (!p) return console.warn(`Granmaster: ${device.name} has no parameter "${name}"`);
-  // Quantized parameters take the item's index (offset by min) as their value.
-  const item = typeof value === "string" ? p.valueItems.findIndex((it) => it.name.includes(value)) : 0;
-  const v = typeof value === "string" ? p.min + item : typeof value === "function" ? value(p) : value;
-  if (item < 0) return console.warn(`Granmaster: ${device.name}.${name} has no option "${value}"`);
+  if (!p) console.warn(`Granmaster: ${device.name} has no parameter "${name}"`);
+  return p;
+};
+
+// value: a number (clamped to range) or a function of the parameter.
+async function setParam(device: Device<V>, name: string, value: number | ((p: Param) => number)) {
+  const p = findParam(device, name);
+  if (!p) return;
+  const v = typeof value === "function" ? value(p) : value;
   await p.setValue(Math.min(p.max, Math.max(p.min, v)));
+}
+
+// Quantized parameters take the item's index (offset by min). Item names differ from the UI labels,
+// so match loosely and fall back to the known index, logging the real names to tune the pattern.
+async function setChoice(device: Device<V>, name: string, pattern: RegExp, fallbackIndex: number) {
+  const p = findParam(device, name);
+  if (!p) return;
+  let index = p.valueItems.findIndex((it) => pattern.test(it.name) || pattern.test(it.shortName));
+  if (index < 0) {
+    const names = p.valueItems.map((it) => `${it.name}/${it.shortName}`).join(", ") || "(none)";
+    console.warn(`Granmaster: ${device.name}.${name}: no item matches ${pattern} in [${names}], using item ${fallbackIndex}`);
+    index = fallbackIndex;
+  }
+  await p.setValue(Math.min(p.max, p.min + index));
 }
