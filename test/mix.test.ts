@@ -47,6 +47,10 @@ test("roles from track names", () => {
   assert.equal(roleOf("Lead Vox"), "vox");
   assert.equal(roleOf("Open HH"), "hats");
   assert.equal(roleOf("Audio 7"), "other");
+  assert.equal(roleOf("2-AG Techno Kit"), "drums");
+  assert.equal(roleOf("Bass Drum"), "kick");
+  assert.equal(roleOf("4-808 Slapping"), "bass");
+  assert.equal(roleOf("1-Organ LoFi"), "lead");
 });
 
 test("plan: gains toward target, centered lows, spread sides, no HPF on kick/bass", () => {
